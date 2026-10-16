@@ -341,6 +341,92 @@ conn(run.RenderStepped, function()
 	end
 end)
 
+local skinModels = {}
+local skinOptions = {}
+pcall(function()
+	for _, f in ipairs(game:GetService("ReplicatedStorage").Misc.ViewModels.Skins:GetChildren()) do
+		if f:IsA("Folder") then
+			for _, m in ipairs(f:GetChildren()) do
+				local key = f.Name .. " " .. m.Name:gsub("^v_", "")
+				skinModels[key] = m
+				table.insert(skinOptions, key)
+			end
+		end
+	end
+	table.sort(skinOptions)
+	if #skinOptions == 0 then skinOptions[1] = "none" end
+end)
+
+local ghostModel, ghostLive, ghostHandle = nil, nil, nil
+local ghostOffsets = {}
+local function clearGhost()
+	if ghostModel then pcall(function() ghostModel:Destroy() end) end
+	ghostModel, ghostLive, ghostHandle = nil, nil, nil
+	ghostOffsets = {}
+end
+
+local function findLiveVM()
+	for _, c in ipairs(ws.CurrentCamera:GetChildren()) do
+		if c:IsA("Model") and c.Name:sub(1, 2) == "v_" and c ~= ghostModel then return c end
+	end
+	return nil
+end
+
+local function applySkin(key)
+	clearGhost()
+	local src = skinModels[key]
+	if not src then return end
+	local ok, clone = pcall(function() return src:Clone() end)
+	if not ok or not clone then return end
+	local srcHandle = src:FindFirstChild("Handle", true) or src.PrimaryPart or src:FindFirstChildWhichIsA("BasePart", true)
+	if not srcHandle then pcall(function() clone:Destroy() end) return end
+	local cps, sps = {}, {}
+	for _, d in ipairs(clone:GetDescendants()) do
+		if d:IsA("Motor6D") or d:IsA("Weld") then d:Destroy()
+		elseif d:IsA("BasePart") then table.insert(cps, d) end
+	end
+	for _, d in ipairs(src:GetDescendants()) do
+		if d:IsA("BasePart") then table.insert(sps, d) end
+	end
+	local hc = srcHandle.CFrame
+	for i, cp in ipairs(cps) do
+		local sp = sps[i]
+		if sp then
+			ghostOffsets[cp] = hc:Inverse() * sp.CFrame
+			cp.Anchored = true cp.CanCollide = false cp.CanQuery = false cp.CanTouch = false
+		end
+	end
+	clone.Name = "v_ghost"
+	clone.Parent = ws.CurrentCamera
+	ghostModel = clone
+end
+
+conn(run.RenderStepped, function()
+	if DEAD then return end
+	local live = findLiveVM()
+	if live ~= ghostLive then
+		ghostLive = live
+		ghostHandle = live and (live:FindFirstChild("Handle", true) or live.PrimaryPart or live:FindFirstChildWhichIsA("BasePart", true))
+	end
+	if not ghostModel then return end
+	if flag("skin_on", false) and ghostLive and ghostHandle then
+		local hc = ghostHandle.CFrame
+		for cp, off in pairs(ghostOffsets) do
+			if cp.Parent then cp.CFrame = hc * off end
+		end
+		for _, d in ipairs(ghostLive:GetDescendants()) do
+			if d:IsA("BasePart") then d.LocalTransparencyModifier = 1 end
+		end
+		for _, d in ipairs(ghostModel:GetDescendants()) do
+			if d:IsA("BasePart") then d.LocalTransparencyModifier = 0 end
+		end
+	else
+		for _, d in ipairs(ghostModel:GetDescendants()) do
+			if d:IsA("BasePart") then d.LocalTransparencyModifier = 1 end
+		end
+	end
+end)
+
 local function noAfk()
 	pcall(function()
 		local vu = game:GetService("VirtualUser")
@@ -398,6 +484,11 @@ Controls.col_friend = colSec:Colorpicker({Title = "friend", Flag = "col_friend",
 local misc = Window:Tab("misc")
 local miscSec = misc:Section("gameplay", "Left")
 Controls.anti_afk = miscSec:Toggle({Title = "anti afk", Flag = "anti_afk", Default = true})
+local skinSec = misc:Section("skin changer", "Right")
+Controls.skin_pick = skinSec:Dropdown({Title = "skin", Flag = "skin_pick", List = skinOptions, Default = skinOptions[1] or "none"})
+Controls.skin_on = skinSec:Toggle({Title = "enabled", Flag = "skin_on", Default = false})
+skinSec:Button({Title = "apply skin", Callback = function() applySkin(flag("skin_pick")) end})
+skinSec:Button({Title = "clear skin", Callback = clearGhost})
 
 local function cfgPath()
 	local s = flag("cfg_slot", "default")
@@ -459,6 +550,14 @@ local function vaUnload()
 	end
 	table.clear(espPool)
 	pcall(function() fovCircle:Remove() end)
+	if ghostLive then
+		pcall(function()
+			for _, d in ipairs(ghostLive:GetDescendants()) do
+				if d:IsA("BasePart") then d.LocalTransparencyModifier = 0 end
+			end
+		end)
+	end
+	clearGhost()
 	if hooked then pcall(function() hookmetamethod(game, "__namecall", oldNC) end) end
 	for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
 	pcall(function() Library.SelfDestruct() end)
