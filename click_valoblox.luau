@@ -342,14 +342,27 @@ conn(run.RenderStepped, function()
 end)
 
 local skinModels = {}
+local skinBases = {}
 local skinOptions = {}
 pcall(function()
-	for _, f in ipairs(game:GetService("ReplicatedStorage").Misc.ViewModels.Skins:GetChildren()) do
+	local rs = game:GetService("ReplicatedStorage")
+	for _, f in ipairs(rs.Misc.ViewModels.Skins:GetChildren()) do
 		if f:IsA("Folder") then
 			for _, m in ipairs(f:GetChildren()) do
 				local key = f.Name .. " " .. m.Name:gsub("^v_", "")
 				skinModels[key] = m
+				skinBases[key] = m.Name:gsub("^v_", "")
 				table.insert(skinOptions, key)
+			end
+		end
+	end
+	for _, baseF in ipairs(rs.Tools:GetChildren()) do
+		for _, t in ipairs(baseF:GetChildren()) do
+			for key, m in pairs(skinModels) do
+				local sn, w = m.Parent.Name, m.Name:sub(3)
+				if t.Name:find(sn, 1, true) and t.Name:find(w, 1, true) then
+					skinBases[key] = baseF.Name
+				end
 			end
 		end
 	end
@@ -357,12 +370,13 @@ pcall(function()
 	if #skinOptions == 0 then skinOptions[1] = "none" end
 end)
 
-local ghostModel, ghostLive, ghostHandle = nil, nil, nil
+local ghostModel, ghostLive, ghostHandle, ghostBase = nil, nil, nil, nil
 local ghostOffsets = {}
 local function clearGhost()
 	if ghostModel then pcall(function() ghostModel:Destroy() end) end
 	ghostModel, ghostLive, ghostHandle = nil, nil, nil
 	ghostOffsets = {}
+	ghostBase = nil
 end
 
 local function findLiveVM()
@@ -376,6 +390,7 @@ local function applySkin(key)
 	clearGhost()
 	local src = skinModels[key]
 	if not src then return end
+	ghostBase = skinBases[key]
 	local ok, clone = pcall(function() return src:Clone() end)
 	if not ok or not clone then return end
 	local srcHandle = src:FindFirstChild("Handle", true) or src.PrimaryPart or src:FindFirstChildWhichIsA("BasePart", true)
@@ -396,8 +411,8 @@ local function applySkin(key)
 			cp.Anchored = true cp.CanCollide = false cp.CanQuery = false cp.CanTouch = false
 		end
 	end
-	clone.Name = "v_ghost"
-	clone.Parent = ws.CurrentCamera
+	clone.Name = "waffle_skin"
+	clone.Parent = ws
 	ghostModel = clone
 end
 
@@ -409,7 +424,7 @@ conn(run.RenderStepped, function()
 		ghostHandle = live and (live:FindFirstChild("Handle", true) or live.PrimaryPart or live:FindFirstChildWhichIsA("BasePart", true))
 	end
 	if not ghostModel then return end
-	if flag("skin_on", false) and ghostLive and ghostHandle then
+	if flag("skin_on", false) and ghostLive and ghostHandle and ghostLive.Name == "v_" .. tostring(ghostBase) then
 		local hc = ghostHandle.CFrame
 		for cp, off in pairs(ghostOffsets) do
 			if cp.Parent then cp.CFrame = hc * off end
