@@ -230,7 +230,7 @@ local function pickTarget()
 					local sp, on = w2s(part.Position)
 					if on then
 						local d = (sp - mPos).Magnitude
-						if d < bestScore and (not CFG.WallCheck or rayVisible(part.Position, char)) then
+						if d < bestScore and (flag("wallbang", false) or not CFG.WallCheck or rayVisible(part.Position, char)) then
 							best, bestScore = part, d
 						end
 					end
@@ -297,20 +297,65 @@ conn(run.RenderStepped, function()
 	cam.CFrame = CFG.Smooth > 0 and cam.CFrame:Lerp(goal, math.clamp(CFG.Smooth, 0.05, 1)) or goal
 end)
 
+local pendingShot = nil
+local inRay = false
+local function rayAimsAt(origin, dir, targetPos)
+	if dir.Magnitude == 0 then return false end
+	local unit = dir.Unit
+	local along = (targetPos - origin):Dot(unit)
+	if along <= 0 then return false end
+	return ((origin + unit * along) - targetPos).Magnitude <= 2.5
+end
+
 local oldNC = nil
 local hooked = false
 if hookmetamethod and getnamecallmethod and newcclosure then
 	pcall(function()
 		oldNC = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
 			local method = getnamecallmethod()
-			if method ~= "ScreenPointToRay" and method ~= "ViewportPointToRay" then
+			if method == "ScreenPointToRay" or method == "ViewportPointToRay" then
+				if checkcaller() or self ~= ws.CurrentCamera then return oldNC(self, ...) end
+				if not flag("silent_aim", true) or not curTarget then
+					pendingShot = nil
+					return oldNC(self, ...)
+				end
+				local ok = math.random(1, 100) <= (flag("aim_chance", CFG.Chance) or 100)
+				pendingShot = {part = curTarget, ok = ok, t = os.clock()}
+				if not ok then return oldNC(self, ...) end
+				local o = ws.CurrentCamera.CFrame.Position
+				return Ray.new(o, (curTarget.Position - o).Unit)
+			end
+			if inRay or checkcaller() then return oldNC(self, ...) end
+			local ps = pendingShot
+			if not ps or not ps.ok or not flag("wallbang", false) then return oldNC(self, ...) end
+			if os.clock() - ps.t > 0.5 then
+				pendingShot = nil
 				return oldNC(self, ...)
 			end
-			if checkcaller() or self ~= ws.CurrentCamera then return oldNC(self, ...) end
-			if not flag("silent_aim", true) or not curTarget then return oldNC(self, ...) end
-			if math.random(1, 100) > (flag("aim_chance", CFG.Chance) or 100) then return oldNC(self, ...) end
-			local o = ws.CurrentCamera.CFrame.Position
-			return Ray.new(o, (curTarget.Position - o).Unit)
+			if not ps.part or not ps.part.Parent then return oldNC(self, ...) end
+			local tchar = ps.part:FindFirstAncestorOfClass("Model")
+			if not tchar then return oldNC(self, ...) end
+			local args = {...}
+			if method == "Raycast" and self == ws then
+				local origin, dir = args[1], args[2]
+				if typeof(origin) == "Vector3" and typeof(dir) == "Vector3" and rayAimsAt(origin, dir, ps.part.Position) then
+					local rp = RaycastParams.new()
+					rp.FilterType = Enum.RaycastFilterType.Include
+					rp.FilterDescendantsInstances = {tchar}
+					return oldNC(self, origin, dir, rp)
+				end
+			elseif self == ws and (method == "FindPartOnRay" or method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRayWithWhitelist" or method == "FindPartOnRayWithBlackList") then
+				local ray = args[1]
+				if typeof(ray) == "Ray" and rayAimsAt(ray.Origin, ray.Direction, ps.part.Position) then
+					inRay = true
+					local okr, hit, pos, normal, mat = pcall(function()
+						return ws:FindPartOnRayWithWhitelist(ray, {tchar}, true)
+					end)
+					inRay = false
+					if okr and hit then return hit, pos, normal, mat end
+				end
+			end
+			return oldNC(self, ...)
 		end))
 		hooked = true
 	end)
@@ -468,6 +513,7 @@ Controls.aim_part = aimSec:Dropdown({Title = "bone", Flag = "aim_part", List = {
 Controls.aim_chance = aimSec:Slider({Title = "hit chance", Flag = "aim_chance", Min = 10, Max = 100, Default = 100, Decimals = 1, Callback = function(v) CFG.Chance = v end})
 Controls.aim_showfov = aimSec:Toggle({Title = "show fov", Flag = "aim_showfov", Default = true})
 Controls.wall_check = aimSec:Toggle({Title = "wall check", Flag = "wall_check", Default = true, Callback = function(v) CFG.WallCheck = v end})
+Controls.wallbang = aimSec:Toggle({Title = "wallbang", Flag = "wallbang", Default = false})
 
 local camSec = combat:Section("camera aim", "Right")
 local camTgl = camSec:Toggle({Title = "enabled", Flag = "cam_aim", Default = false})
