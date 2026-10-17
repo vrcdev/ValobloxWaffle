@@ -230,7 +230,7 @@ local function pickTarget()
 					local sp, on = w2s(part.Position)
 					if on then
 						local d = (sp - mPos).Magnitude
-						if d < bestScore and (flag("wallbang", false) or not CFG.WallCheck or rayVisible(part.Position, char)) then
+						if d < bestScore and (not CFG.WallCheck or rayVisible(part.Position, char)) then
 							best, bestScore = part, d
 						end
 					end
@@ -297,99 +297,20 @@ conn(run.RenderStepped, function()
 	cam.CFrame = CFG.Smooth > 0 and cam.CFrame:Lerp(goal, math.clamp(CFG.Smooth, 0.05, 1)) or goal
 end)
 
-local pendingShot = nil
-local inRay = false
-local lastRedirect = 0
-local lastFireT = 0
-local function rayAimsAt(origin, dir, targetPos)
-	if dir.Magnitude == 0 then return false end
-	local unit = dir.Unit
-	local along = (targetPos - origin):Dot(unit)
-	if along <= 0 then return false end
-	if ((origin + unit * along) - targetPos).Magnitude <= 4 then return true end
-	return (unit - (targetPos - origin).Unit).Magnitude < 0.35
-end
-
 local oldNC = nil
 local hooked = false
 if hookmetamethod and getnamecallmethod and newcclosure then
 	pcall(function()
 		oldNC = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
 			local method = getnamecallmethod()
-			if method == "ScreenPointToRay" or method == "ViewportPointToRay" then
-				if checkcaller() or self ~= ws.CurrentCamera then return oldNC(self, ...) end
-				local firing = uis:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) or (os.clock() - lastFireT < 0.15)
-				if not flag("silent_aim", true) or not curTarget or not firing then
-					pendingShot = nil
-					return oldNC(self, ...)
-				end
-				local ok = math.random(1, 100) <= (flag("aim_chance", CFG.Chance) or 100)
-				pendingShot = {part = curTarget, ok = ok, t = os.clock()}
-				if not ok then return oldNC(self, ...) end
-				local o = ws.CurrentCamera.CFrame.Position
-				return Ray.new(o, (curTarget.Position - o).Unit)
+			if method ~= "ScreenPointToRay" and method ~= "ViewportPointToRay" then
+				return oldNC(self, ...)
 			end
-			if inRay or checkcaller() then return oldNC(self, ...) end
-			if not flag("silent_aim", true) then return oldNC(self, ...) end
-			local now = os.clock()
-			if now - lastRedirect < 0.04 then return oldNC(self, ...) end
-			if not (uis:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) or now - lastFireT < 0.15) then return oldNC(self, ...) end
-			local ps = pendingShot
-			if ps and now - ps.t > 0.5 then
-				pendingShot = nil
-				ps = nil
-			end
-			if not ps or not ps.ok then
-				if curTarget and uis:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
-					ps = {part = curTarget}
-				else
-					return oldNC(self, ...)
-				end
-			end
-			local tpart = ps.part
-			if not tpart or not tpart.Parent then return oldNC(self, ...) end
-			local tchar = tpart:FindFirstAncestorOfClass("Model")
-			if not tchar then return oldNC(self, ...) end
-			local wb = flag("wallbang", false)
-			local args = {...}
-			if method == "Raycast" and self == ws then
-				local origin, dir = args[1], args[2]
-				if typeof(origin) == "Vector3" and typeof(dir) == "Vector3" and dir.Magnitude > 0
-					and (origin - ws.CurrentCamera.CFrame.Position).Magnitude <= 8
-					and rayAimsAt(origin, dir, tpart.Position) then
-					local params = args[3]
-					if wb then
-						local rp = RaycastParams.new()
-						rp.FilterType = Enum.RaycastFilterType.Include
-						rp.FilterDescendantsInstances = {tchar}
-						params = rp
-					end
-					lastRedirect = now
-					if flag("wb_debug", false) then print("[valo] shot ->", tchar.Name) end
-					return oldNC(self, origin, (tpart.Position - origin).Unit * dir.Magnitude, params)
-				end
-			elseif self == ws and (method == "FindPartOnRay" or method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRayWithWhitelist" or method == "FindPartOnRayWithBlackList") then
-				local ray = args[1]
-				if typeof(ray) == "Ray" and ray.Direction.Magnitude > 0
-					and (ray.Origin - ws.CurrentCamera.CFrame.Position).Magnitude <= 8
-					and rayAimsAt(ray.Origin, ray.Direction, tpart.Position) then
-					local newRay = Ray.new(ray.Origin, (tpart.Position - ray.Origin).Unit * ray.Direction.Magnitude)
-					lastRedirect = now
-					if flag("wb_debug", false) then print("[valo] shot ->", tchar.Name) end
-					if wb then
-						inRay = true
-						local okr, hit, pos, normal, mat = pcall(function()
-							return ws:FindPartOnRayWithWhitelist(newRay, {tchar}, true)
-						end)
-						inRay = false
-						if okr and hit then return hit, pos, normal, mat end
-						return oldNC(self, ...)
-					end
-					args[1] = newRay
-					return oldNC(self, unpack(args))
-				end
-			end
-			return oldNC(self, ...)
+			if checkcaller() or self ~= ws.CurrentCamera then return oldNC(self, ...) end
+			if not flag("silent_aim", true) or not curTarget then return oldNC(self, ...) end
+			if math.random(1, 100) > (flag("aim_chance", CFG.Chance) or 100) then return oldNC(self, ...) end
+			local o = ws.CurrentCamera.CFrame.Position
+			return Ray.new(o, (curTarget.Position - o).Unit)
 		end))
 		hooked = true
 	end)
@@ -521,64 +442,6 @@ conn(run.RenderStepped, function()
 	end
 end)
 
-local spreadKeys = {spread = true, inaccuracy = true, recoil = true, inacc = true}
-local function isSpreadKey(k)
-	if type(k) ~= "string" then return false end
-	k = k:lower()
-	for key in pairs(spreadKeys) do
-		if k:find(key, 1, true) then return true end
-	end
-	return false
-end
-local function zeroSpreadTable(t, depth)
-	if type(t) ~= "table" or depth > 2 then return end
-	for k, v in pairs(t) do
-		if type(v) == "number" and isSpreadKey(k) then
-			t[k] = 0
-		elseif type(v) == "table" and depth < 2 then
-			zeroSpreadTable(v, depth + 1)
-		end
-	end
-end
-local lastSpreadScan = 0
-conn(run.RenderStepped, function()
-	if DEAD or not flag("no_spread", false) then return end
-	if os.clock() - lastSpreadScan < 0.5 then return end
-	lastSpreadScan = os.clock()
-	local ch = charOf(lp)
-	local tool = ch and ch:FindFirstChildOfClass("Tool")
-	if not tool then return end
-	for k, v in pairs(tool:GetAttributes()) do
-		if type(v) == "number" and isSpreadKey(k) and v ~= 0 then
-			pcall(function() tool:SetAttribute(k, 0) end)
-		end
-	end
-	for _, d in ipairs(tool:GetDescendants()) do
-		if (d:IsA("NumberValue") or d:IsA("IntValue")) and d.Value ~= 0 and isSpreadKey(d.Name) then
-			pcall(function() d.Value = 0 end)
-		end
-	end
-	local ls = tool:FindFirstChild("LocalSettings")
-	if ls and ls:IsA("ModuleScript") then
-		pcall(function() zeroSpreadTable(require(ls), 0) end)
-	end
-end)
-
-local lastAuto = 0
-conn(run.RenderStepped, function()
-	if DEAD or not flag("auto_fire", false) then return end
-	local want = uis:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
-	if not want and flag("af_autoshoot", false) and curTarget then want = true end
-	if not want then return end
-	local now = os.clock()
-	if now - lastAuto < flag("af_delay", 0.12) then return end
-	local ch = charOf(lp)
-	local tool = ch and ch:FindFirstChildOfClass("Tool")
-	if not tool then return end
-	lastAuto = now
-	pcall(function() tool:Activate() end)
-end)
-
 local function noAfk()
 	pcall(function()
 		local vu = game:GetService("VirtualUser")
@@ -588,9 +451,6 @@ local function noAfk()
 end
 conn(lp.Idled, function()
 	if flag("anti_afk", true) then noAfk() end
-end)
-conn(uis.InputBegan, function(inp)
-	if inp.UserInputType == Enum.UserInputType.MouseButton1 then lastFireT = os.clock() end
 end)
 
 local Controls = {}
@@ -608,9 +468,6 @@ Controls.aim_part = aimSec:Dropdown({Title = "bone", Flag = "aim_part", List = {
 Controls.aim_chance = aimSec:Slider({Title = "hit chance", Flag = "aim_chance", Min = 10, Max = 100, Default = 100, Decimals = 1, Callback = function(v) CFG.Chance = v end})
 Controls.aim_showfov = aimSec:Toggle({Title = "show fov", Flag = "aim_showfov", Default = true})
 Controls.wall_check = aimSec:Toggle({Title = "wall check", Flag = "wall_check", Default = true, Callback = function(v) CFG.WallCheck = v end})
-Controls.wallbang = aimSec:Toggle({Title = "wallbang", Flag = "wallbang", Default = false})
-Controls.no_spread = aimSec:Toggle({Title = "no spread", Flag = "no_spread", Default = false})
-Controls.wb_debug = aimSec:Toggle({Title = "shot debug", Flag = "wb_debug", Default = false})
 
 local camSec = combat:Section("camera aim", "Right")
 local camTgl = camSec:Toggle({Title = "enabled", Flag = "cam_aim", Default = false})
@@ -623,11 +480,6 @@ local tbSec = combat:Section("triggerbot", "Right")
 Controls.tb_enable = tbSec:Toggle({Title = "enabled", Flag = "tb_enable", Default = false})
 Controls.tb_hold = tbSec:Toggle({Title = "hold LAlt", Flag = "tb_hold", Default = false})
 Controls.tb_delay = tbSec:Slider({Title = "delay", Flag = "tb_delay", Min = 0.02, Max = 0.6, Default = 0.05, Decimals = 100})
-
-local afSec = combat:Section("auto fire", "Right")
-Controls.auto_fire = afSec:Toggle({Title = "enabled", Flag = "auto_fire", Default = false})
-Controls.af_delay = afSec:Slider({Title = "fire delay", Flag = "af_delay", Min = 0.02, Max = 0.5, Default = 0.12, Decimals = 100})
-Controls.af_autoshoot = afSec:Toggle({Title = "auto shoot visible", Flag = "af_autoshoot", Default = false})
 
 local vis = Window:Tab("visuals")
 local espSec = vis:Section("esp", "Left")
