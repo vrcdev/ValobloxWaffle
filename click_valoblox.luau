@@ -304,7 +304,8 @@ local function rayAimsAt(origin, dir, targetPos)
 	local unit = dir.Unit
 	local along = (targetPos - origin):Dot(unit)
 	if along <= 0 then return false end
-	return ((origin + unit * along) - targetPos).Magnitude <= 2.5
+	if ((origin + unit * along) - targetPos).Magnitude <= 4 then return true end
+	return (unit - (targetPos - origin).Unit).Magnitude < 0.35
 end
 
 local oldNC = nil
@@ -326,11 +327,18 @@ if hookmetamethod and getnamecallmethod and newcclosure then
 				return Ray.new(o, (curTarget.Position - o).Unit)
 			end
 			if inRay or checkcaller() then return oldNC(self, ...) end
+			if not flag("wallbang", false) then return oldNC(self, ...) end
 			local ps = pendingShot
-			if not ps or not ps.ok or not flag("wallbang", false) then return oldNC(self, ...) end
-			if os.clock() - ps.t > 0.5 then
+			if ps and os.clock() - ps.t > 0.5 then
 				pendingShot = nil
-				return oldNC(self, ...)
+				ps = nil
+			end
+			if not ps or not ps.ok then
+				if flag("silent_aim", true) and curTarget then
+					ps = {part = curTarget, ok = true}
+				else
+					return oldNC(self, ...)
+				end
 			end
 			if not ps.part or not ps.part.Parent then return oldNC(self, ...) end
 			local tchar = ps.part:FindFirstAncestorOfClass("Model")
@@ -342,6 +350,7 @@ if hookmetamethod and getnamecallmethod and newcclosure then
 					local rp = RaycastParams.new()
 					rp.FilterType = Enum.RaycastFilterType.Include
 					rp.FilterDescendantsInstances = {tchar}
+					print("[valo] wallbang ->", tchar.Name)
 					return oldNC(self, origin, dir, rp)
 				end
 			elseif self == ws and (method == "FindPartOnRay" or method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRayWithWhitelist" or method == "FindPartOnRayWithBlackList") then
@@ -352,7 +361,10 @@ if hookmetamethod and getnamecallmethod and newcclosure then
 						return ws:FindPartOnRayWithWhitelist(ray, {tchar}, true)
 					end)
 					inRay = false
-					if okr and hit then return hit, pos, normal, mat end
+					if okr and hit then
+						print("[valo] wallbang ->", tchar.Name)
+						return hit, pos, normal, mat
+					end
 				end
 			end
 			return oldNC(self, ...)
@@ -487,6 +499,49 @@ conn(run.RenderStepped, function()
 	end
 end)
 
+local spreadKeys = {spread = true, inaccuracy = true, recoil = true, inacc = true}
+local function isSpreadKey(k)
+	if type(k) ~= "string" then return false end
+	k = k:lower()
+	for key in pairs(spreadKeys) do
+		if k:find(key, 1, true) then return true end
+	end
+	return false
+end
+local function zeroSpreadTable(t, depth)
+	if type(t) ~= "table" or depth > 2 then return end
+	for k, v in pairs(t) do
+		if type(v) == "number" and isSpreadKey(k) then
+			t[k] = 0
+		elseif type(v) == "table" and depth < 2 then
+			zeroSpreadTable(v, depth + 1)
+		end
+	end
+end
+local lastSpreadScan = 0
+conn(run.RenderStepped, function()
+	if DEAD or not flag("no_spread", false) then return end
+	if os.clock() - lastSpreadScan < 0.5 then return end
+	lastSpreadScan = os.clock()
+	local ch = charOf(lp)
+	local tool = ch and ch:FindFirstChildOfClass("Tool")
+	if not tool then return end
+	for k, v in pairs(tool:GetAttributes()) do
+		if type(v) == "number" and isSpreadKey(k) and v ~= 0 then
+			pcall(function() tool:SetAttribute(k, 0) end)
+		end
+	end
+	for _, d in ipairs(tool:GetDescendants()) do
+		if (d:IsA("NumberValue") or d:IsA("IntValue")) and d.Value ~= 0 and isSpreadKey(d.Name) then
+			pcall(function() d.Value = 0 end)
+		end
+	end
+	local ls = tool:FindFirstChild("LocalSettings")
+	if ls and ls:IsA("ModuleScript") then
+		pcall(function() zeroSpreadTable(require(ls), 0) end)
+	end
+end)
+
 local function noAfk()
 	pcall(function()
 		local vu = game:GetService("VirtualUser")
@@ -514,6 +569,7 @@ Controls.aim_chance = aimSec:Slider({Title = "hit chance", Flag = "aim_chance", 
 Controls.aim_showfov = aimSec:Toggle({Title = "show fov", Flag = "aim_showfov", Default = true})
 Controls.wall_check = aimSec:Toggle({Title = "wall check", Flag = "wall_check", Default = true, Callback = function(v) CFG.WallCheck = v end})
 Controls.wallbang = aimSec:Toggle({Title = "wallbang", Flag = "wallbang", Default = false})
+Controls.no_spread = aimSec:Toggle({Title = "no spread", Flag = "no_spread", Default = false})
 
 local camSec = combat:Section("camera aim", "Right")
 local camTgl = camSec:Toggle({Title = "enabled", Flag = "cam_aim", Default = false})
