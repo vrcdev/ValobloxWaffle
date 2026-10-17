@@ -542,6 +542,19 @@ conn(run.RenderStepped, function()
 	end
 end)
 
+local lastAuto = 0
+conn(run.RenderStepped, function()
+	if DEAD or not flag("auto_fire", false) then return end
+	if not uis:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then return end
+	local now = os.clock()
+	if now - lastAuto < flag("af_delay", 0.12) then return end
+	local ch = charOf(lp)
+	local tool = ch and ch:FindFirstChildOfClass("Tool")
+	if not tool then return end
+	lastAuto = now
+	pcall(function() tool:Activate() end)
+end)
+
 local function noAfk()
 	pcall(function()
 		local vu = game:GetService("VirtualUser")
@@ -582,6 +595,10 @@ local tbSec = combat:Section("triggerbot", "Right")
 Controls.tb_enable = tbSec:Toggle({Title = "enabled", Flag = "tb_enable", Default = false})
 Controls.tb_hold = tbSec:Toggle({Title = "hold LAlt", Flag = "tb_hold", Default = false})
 Controls.tb_delay = tbSec:Slider({Title = "delay", Flag = "tb_delay", Min = 0.02, Max = 0.6, Default = 0.05, Decimals = 100})
+
+local afSec = combat:Section("auto fire", "Right")
+Controls.auto_fire = afSec:Toggle({Title = "enabled", Flag = "auto_fire", Default = false})
+Controls.af_delay = afSec:Slider({Title = "fire delay", Flag = "af_delay", Min = 0.02, Max = 0.5, Default = 0.12, Decimals = 100})
 
 local vis = Window:Tab("visuals")
 local espSec = vis:Section("esp", "Left")
