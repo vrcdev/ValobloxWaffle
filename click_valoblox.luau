@@ -299,6 +299,7 @@ end)
 
 local pendingShot = nil
 local inRay = false
+local lastRedirect = 0
 local function rayAimsAt(origin, dir, targetPos)
 	if dir.Magnitude == 0 then return false end
 	local unit = dir.Unit
@@ -327,44 +328,58 @@ if hookmetamethod and getnamecallmethod and newcclosure then
 				return Ray.new(o, (curTarget.Position - o).Unit)
 			end
 			if inRay or checkcaller() then return oldNC(self, ...) end
-			if not flag("wallbang", false) then return oldNC(self, ...) end
+			if not flag("silent_aim", true) then return oldNC(self, ...) end
+			local now = os.clock()
+			if now - lastRedirect < 0.04 then return oldNC(self, ...) end
 			local ps = pendingShot
-			if ps and os.clock() - ps.t > 0.5 then
+			if ps and now - ps.t > 0.5 then
 				pendingShot = nil
 				ps = nil
 			end
 			if not ps or not ps.ok then
-				if flag("silent_aim", true) and curTarget then
-					ps = {part = curTarget, ok = true}
+				if curTarget and uis:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+					ps = {part = curTarget}
 				else
 					return oldNC(self, ...)
 				end
 			end
-			if not ps.part or not ps.part.Parent then return oldNC(self, ...) end
-			local tchar = ps.part:FindFirstAncestorOfClass("Model")
+			local tpart = ps.part
+			if not tpart or not tpart.Parent then return oldNC(self, ...) end
+			local tchar = tpart:FindFirstAncestorOfClass("Model")
 			if not tchar then return oldNC(self, ...) end
+			local wb = flag("wallbang", false)
 			local args = {...}
 			if method == "Raycast" and self == ws then
 				local origin, dir = args[1], args[2]
-				if typeof(origin) == "Vector3" and typeof(dir) == "Vector3" and rayAimsAt(origin, dir, ps.part.Position) then
-					local rp = RaycastParams.new()
-					rp.FilterType = Enum.RaycastFilterType.Include
-					rp.FilterDescendantsInstances = {tchar}
-					print("[valo] wallbang ->", tchar.Name)
-					return oldNC(self, origin, dir, rp)
+				if typeof(origin) == "Vector3" and typeof(dir) == "Vector3" and dir.Magnitude > 0 and rayAimsAt(origin, dir, tpart.Position) then
+					local params = args[3]
+					if wb then
+						local rp = RaycastParams.new()
+						rp.FilterType = Enum.RaycastFilterType.Include
+						rp.FilterDescendantsInstances = {tchar}
+						params = rp
+					end
+					lastRedirect = now
+					if flag("wb_debug", false) then print("[valo] shot ->", tchar.Name) end
+					return oldNC(self, origin, (tpart.Position - origin).Unit * dir.Magnitude, params)
 				end
 			elseif self == ws and (method == "FindPartOnRay" or method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRayWithWhitelist" or method == "FindPartOnRayWithBlackList") then
 				local ray = args[1]
-				if typeof(ray) == "Ray" and rayAimsAt(ray.Origin, ray.Direction, ps.part.Position) then
-					inRay = true
-					local okr, hit, pos, normal, mat = pcall(function()
-						return ws:FindPartOnRayWithWhitelist(ray, {tchar}, true)
-					end)
-					inRay = false
-					if okr and hit then
-						print("[valo] wallbang ->", tchar.Name)
-						return hit, pos, normal, mat
+				if typeof(ray) == "Ray" and ray.Direction.Magnitude > 0 and rayAimsAt(ray.Origin, ray.Direction, tpart.Position) then
+					local newRay = Ray.new(ray.Origin, (tpart.Position - ray.Origin).Unit * ray.Direction.Magnitude)
+					lastRedirect = now
+					if flag("wb_debug", false) then print("[valo] shot ->", tchar.Name) end
+					if wb then
+						inRay = true
+						local okr, hit, pos, normal, mat = pcall(function()
+							return ws:FindPartOnRayWithWhitelist(newRay, {tchar}, true)
+						end)
+						inRay = false
+						if okr and hit then return hit, pos, normal, mat end
+						return oldNC(self, ...)
 					end
+					args[1] = newRay
+					return oldNC(self, unpack(args))
 				end
 			end
 			return oldNC(self, ...)
@@ -585,6 +600,7 @@ Controls.aim_showfov = aimSec:Toggle({Title = "show fov", Flag = "aim_showfov", 
 Controls.wall_check = aimSec:Toggle({Title = "wall check", Flag = "wall_check", Default = true, Callback = function(v) CFG.WallCheck = v end})
 Controls.wallbang = aimSec:Toggle({Title = "wallbang", Flag = "wallbang", Default = false})
 Controls.no_spread = aimSec:Toggle({Title = "no spread", Flag = "no_spread", Default = false})
+Controls.wb_debug = aimSec:Toggle({Title = "shot debug", Flag = "wb_debug", Default = false})
 
 local camSec = combat:Section("camera aim", "Right")
 local camTgl = camSec:Toggle({Title = "enabled", Flag = "cam_aim", Default = false})
