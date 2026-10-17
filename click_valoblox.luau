@@ -537,8 +537,9 @@ end})
 local miscSec = misc:Section("misc", "Right")
 Controls.anti_afk = miscSec:Toggle({Title = "anti afk", Flag = "anti_afk", Default = true})
 
-local settings = Window:Tab("settings")
-local cfgSec = settings:Section("config", "Left")
+local unloadAll
+local settings = Window:AddSettingsTab(function() if unloadAll then unloadAll() end end)
+local cfgSec = settings:Section("config", "Right")
 local slots = {"slot 1", "slot 2", "slot 3"}
 local slotFiles = {["slot 1"] = "valo_cfg.json", ["slot 2"] = "valo_cfg_slot_2.json", ["slot 3"] = "valo_cfg_slot_3.json"}
 local curSlot = "slot 1"
@@ -574,7 +575,7 @@ cfgSec:Button({Title = "load", Callback = function()
 		end
 	end)
 end})
-local function unloadAll()
+unloadAll = function()
 	if DEAD then return end
 	DEAD = true
 	for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
@@ -588,11 +589,13 @@ local function unloadAll()
 	pcall(function() fovCircle:Remove() end)
 	clearGhost()
 	if hooked then pcall(function() hookmetamethod(game, "__namecall", oldNC) end) end
-	pcall(function() if Window.Unload then Window:Unload() elseif Library.Unload then Library:Unload() end end)
+	pcall(function() Library.SelfDestruct() end)
 end
 
-settings:Section("unload", "Right"):Button({Title = "unload (End)", Callback = unloadAll})
+settings:Section("unload", "Left"):Button({Title = "unload (End)", Callback = unloadAll})
 
-uis.InputBegan:Connect(function(inp)
+conn(uis.InputBegan, function(inp)
 	if inp.KeyCode == Enum.KeyCode.End then unloadAll() end
 end)
+
+pcall(function() Window:SwitchTab(combat) end)
