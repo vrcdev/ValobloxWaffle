@@ -545,7 +545,9 @@ end)
 local lastAuto = 0
 conn(run.RenderStepped, function()
 	if DEAD or not flag("auto_fire", false) then return end
-	if not uis:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then return end
+	local want = uis:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+	if not want and flag("af_autoshoot", false) and curTarget then want = true end
+	if not want then return end
 	local now = os.clock()
 	if now - lastAuto < flag("af_delay", 0.12) then return end
 	local ch = charOf(lp)
@@ -599,6 +601,7 @@ Controls.tb_delay = tbSec:Slider({Title = "delay", Flag = "tb_delay", Min = 0.02
 local afSec = combat:Section("auto fire", "Right")
 Controls.auto_fire = afSec:Toggle({Title = "enabled", Flag = "auto_fire", Default = false})
 Controls.af_delay = afSec:Slider({Title = "fire delay", Flag = "af_delay", Min = 0.02, Max = 0.5, Default = 0.12, Decimals = 100})
+Controls.af_autoshoot = afSec:Toggle({Title = "auto shoot visible", Flag = "af_autoshoot", Default = false})
 
 local vis = Window:Tab("visuals")
 local espSec = vis:Section("esp", "Left")
