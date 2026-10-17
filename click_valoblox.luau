@@ -1,15 +1,14 @@
 local uis = game:GetService("UserInputService")
 local players = game:GetService("Players")
 local ws = game:GetService("Workspace")
+local rs = game:GetService("ReplicatedStorage")
 local run = game:GetService("RunService")
-local http_service = game:GetService("HttpService")
 local lp = players.LocalPlayer
 local vec2 = Vector2.new
 local rgb = Color3.fromRGB
 local min, max, abs = math.min, math.max, math.abs
 
 local Library = getgenv().Library or Library
-
 local Utility = getgenv().Utility
 if Utility and Utility.AddImage then
 	pcall(function()
@@ -25,7 +24,7 @@ if Utility and Utility.AddImage then
 		T.SaturationCursor = T.SaturationCursor or Utility.AddImage("Abyss/Assets/UI/HueCursor.png", "https://raw.githubusercontent.com/mvonwalk/splix-assets/main/Images-cursor.png")
 		T.Logo = T.Logo or Utility.AddImage("Waffle/Assets/waffle.png", "https://raw.githubusercontent.com/vrcdev/ValobloxWaffle/main/waffle.png")
 		T.Astolfo = T.Astolfo or Utility.AddImage("Abyss/Assets/UI/Astolfo.png", "https://i.imgur.com/T20cWY9.png")
-		T.Aiko = T.Aiko or Utility.AddImage("Abyss/Assets/UI/Aiko.png", "https://i.imgur.com/1gRIdko.png")
+		T.Aiko = T.Aiko or Utility.AddImage("Abyss/Assets/UI/Aiko.png", "https://i.imgur.com/ykbRkhJ.png")
 		T.Rem = T.Rem or Utility.AddImage("Abyss/Assets/UI/Rem.png", "https://i.imgur.com/ykbRkhJ.png")
 		T.Violet = T.Violet or Utility.AddImage("Abyss/Assets/UI/Violet.png", "https://i.imgur.com/7B56w4a.png")
 		T.Asuka = T.Asuka or Utility.AddImage("Abyss/Assets/UI/Asuka.png", "https://i.imgur.com/3hwztNM.png")
@@ -38,13 +37,8 @@ local function flag(name, default)
 	if v == nil then return default end
 	return v
 end
-local function teamEq(a, b)
-	if a == nil or b == nil then return false end
-	if a == b then return true end
-	return tostring(a) == tostring(b)
-end
-local CFG = {FOV = 220, Smooth = 0.3, WallCheck = true, AimPart = "Head", Chance = 100}
 
+local CFG = {FOV = 220, Smooth = 0.3, WallCheck = true, AimPart = "HeadHB", Chance = 100}
 local DEAD = false
 
 local SKEL_R15 = {
@@ -69,10 +63,11 @@ local function charOf(p)
 end
 local function humanoidOf(char) return char:FindFirstChildOfClass("Humanoid") end
 local function aimPart(char)
-	return char:FindFirstChild(CFG.AimPart) or char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+	return char:FindFirstChild(CFG.AimPart) or char:FindFirstChild("HeadHB") or char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
 end
 local function friendly(p)
-	return teamEq(p.Team, lp.Team)
+	local c = charOf(p)
+	return c ~= nil and c:FindFirstChild("TeammateHightlight") ~= nil
 end
 
 local function w2s(v3)
@@ -84,8 +79,9 @@ end
 local visParams = RaycastParams.new()
 visParams.FilterType = Enum.RaycastFilterType.Exclude
 local function rayVisible(toPos, char)
-	local from = ws.CurrentCamera.CFrame.Position
-	visParams.FilterDescendantsInstances = {charOf(lp), char, ws.CurrentCamera}
+	local cam = ws.CurrentCamera
+	local from = cam.CFrame.Position
+	visParams.FilterDescendantsInstances = {charOf(lp), char, cam}
 	return ws:Raycast(from, toPos - from, visParams) == nil
 end
 
@@ -127,7 +123,7 @@ local function updateESP(e, p)
 	if not (char and hum and root and hum.Health > 0) then hideAll() return end
 	local rootPos, onScreen, depth = w2s(root.Position)
 	local behind = depth < 0
-	local head = char:FindFirstChild("Head")
+	local head = char:FindFirstChild("Head") or char:FindFirstChild("HeadHB")
 	local headPos = head and head.Position or root.Position + Vector3.new(0, 1.6, 0)
 	local top = w2s(headPos + Vector3.new(0, 0.6, 0))
 	local bottom = w2s(root.Position - Vector3.new(0, 2.8, 0))
@@ -218,7 +214,6 @@ end
 local curTarget = nil
 local function pickTarget()
 	local mPos = uis:GetMouseLocation()
-	local camera = ws.CurrentCamera
 	local best, bestScore = nil, flag("aim_fov", CFG.FOV)
 	for _, p in ipairs(players:GetPlayers()) do
 		if p ~= lp and not (flag("team_check", true) and friendly(p)) then
@@ -230,7 +225,7 @@ local function pickTarget()
 					local sp, on = w2s(part.Position)
 					if on then
 						local d = (sp - mPos).Magnitude
-						if d < bestScore and (not CFG.WallCheck or rayVisible(part.Position, char)) then
+						if d < bestScore and (flag("wallbang", false) or not CFG.WallCheck or rayVisible(part.Position, char)) then
 							best, bestScore = part, d
 						end
 					end
@@ -302,15 +297,26 @@ local hooked = false
 if hookmetamethod and getnamecallmethod and newcclosure then
 	pcall(function()
 		oldNC = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-			local method = getnamecallmethod()
-			if method ~= "ScreenPointToRay" and method ~= "ViewportPointToRay" then
+			if checkcaller() or getnamecallmethod() ~= "FireServer" or self.Name ~= "Shoot" then
 				return oldNC(self, ...)
 			end
-			if checkcaller() or self ~= ws.CurrentCamera then return oldNC(self, ...) end
-			if not flag("silent_aim", true) or not curTarget then return oldNC(self, ...) end
+			if not flag("silent_aim", true) or not curTarget or not curTarget.Parent then return oldNC(self, ...) end
 			if math.random(1, 100) > (flag("aim_chance", CFG.Chance) or 100) then return oldNC(self, ...) end
-			local o = ws.CurrentCamera.CFrame.Position
-			return Ray.new(o, (curTarget.Position - o).Unit)
+			local a = {...}
+			local targetPos = curTarget.Position
+			a[1] = curTarget
+			a[2] = targetPos
+			local origin = a[5]
+			if typeof(origin) == "Vector3" then
+				a[3] = (origin - targetPos).Unit
+			else
+				a[3] = a[3] or Vector3.new(0, 1, 0)
+			end
+			if flag("wb_debug", false) then
+				local owner = curTarget.Parent and curTarget.Parent.Name or "?"
+				print("[valo] shoot ->", owner)
+			end
+			return oldNC(self, unpack(a))
 		end))
 		hooked = true
 	end)
@@ -322,8 +328,7 @@ conn(run.RenderStepped, function()
 	if DEAD or not flag("tb_enable", false) then return end
 	if flag("tb_hold", false) and not uis:IsKeyDown(Enum.KeyCode.LeftAlt) then return end
 	local now = os.clock()
-	local delay = flag("tb_delay", 0.05)
-	if now - lastTB < delay then return end
+	if now - lastTB < flag("tb_delay", 0.05) then return end
 	local cam = ws.CurrentCamera
 	local rp = RaycastParams.new()
 	rp.FilterType = Enum.RaycastFilterType.Exclude
@@ -341,28 +346,30 @@ conn(run.RenderStepped, function()
 	end
 end)
 
+local lastAuto = 0
+conn(run.RenderStepped, function()
+	if DEAD or not flag("auto_fire", false) then return end
+	local want = uis:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+	if not want and flag("af_autoshoot", false) and curTarget then want = true end
+	if not want then return end
+	local now = os.clock()
+	if now - lastAuto < flag("af_delay", 0.12) then return end
+	lastAuto = now
+	if mouse1click then pcall(mouse1click) end
+end)
+
 local skinModels = {}
 local skinBases = {}
 local skinOptions = {}
 pcall(function()
-	local rs = game:GetService("ReplicatedStorage")
-	for _, f in ipairs(rs.Misc.ViewModels.Skins:GetChildren()) do
-		if f:IsA("Folder") then
-			for _, m in ipairs(f:GetChildren()) do
-				local key = f.Name .. " " .. m.Name:gsub("^v_", "")
+	local fp = rs.WeaponEngine.Skins.FirstPerson
+	for _, gunF in ipairs(fp:GetChildren()) do
+		for _, m in ipairs(gunF:GetChildren()) do
+			if m:IsA("Model") then
+				local key = m.Name:gsub("^v_", "")
 				skinModels[key] = m
-				skinBases[key] = m.Name:gsub("^v_", "")
+				skinBases[key] = gunF.Name
 				table.insert(skinOptions, key)
-			end
-		end
-	end
-	for _, baseF in ipairs(rs.Tools:GetChildren()) do
-		for _, t in ipairs(baseF:GetChildren()) do
-			for key, m in pairs(skinModels) do
-				local sn, w = m.Parent.Name, m.Name:sub(3)
-				if t.Name:find(sn, 1, true) and t.Name:find(w, 1, true) then
-					skinBases[key] = baseF.Name
-				end
 			end
 		end
 	end
@@ -370,18 +377,19 @@ pcall(function()
 	if #skinOptions == 0 then skinOptions[1] = "none" end
 end)
 
-local ghostModel, ghostLive, ghostHandle, ghostBase = nil, nil, nil, nil
-local ghostOffsets = {}
+local ghostModel, ghostLive, ghostHandle = nil, nil, nil
+local ghostNameMap, ghostOffsets = {}, {}
 local function clearGhost()
 	if ghostModel then pcall(function() ghostModel:Destroy() end) end
 	ghostModel, ghostLive, ghostHandle = nil, nil, nil
-	ghostOffsets = {}
-	ghostBase = nil
+	ghostNameMap, ghostOffsets = {}, {}
 end
 
-local function findLiveVM()
-	for _, c in ipairs(ws.CurrentCamera:GetChildren()) do
-		if c:IsA("Model") and c.Name:sub(1, 2) == "v_" and c ~= ghostModel then return c end
+local function liveWeaponModel()
+	local arms = ws.CurrentCamera:FindFirstChild("Arms")
+	if not arms then return nil end
+	for _, c in ipairs(arms:GetChildren()) do
+		if c:IsA("Model") then return c end
 	end
 	return nil
 end
@@ -390,26 +398,23 @@ local function applySkin(key)
 	clearGhost()
 	local src = skinModels[key]
 	if not src then return end
-	ghostBase = skinBases[key]
 	local ok, clone = pcall(function() return src:Clone() end)
 	if not ok or not clone then return end
-	local srcHandle = src:FindFirstChild("Handle", true) or src.PrimaryPart or src:FindFirstChildWhichIsA("BasePart", true)
+	local gv = clone:FindFirstChild("GunVisual") or clone
+	local srcGv = src:FindFirstChild("GunVisual") or src
+	local srcHandle = srcGv:FindFirstChild("Handle", true) or srcGv.PrimaryPart or srcGv:FindFirstChildWhichIsA("BasePart", true)
 	if not srcHandle then pcall(function() clone:Destroy() end) return end
-	local cps, sps = {}, {}
+	local hc = srcHandle.CFrame
+	local cloneParts = {}
 	for _, d in ipairs(clone:GetDescendants()) do
 		if d:IsA("Motor6D") or d:IsA("Weld") then d:Destroy()
-		elseif d:IsA("BasePart") then table.insert(cps, d) end
+		elseif d:IsA("BasePart") then table.insert(cloneParts, d) end
 	end
-	for _, d in ipairs(src:GetDescendants()) do
-		if d:IsA("BasePart") then table.insert(sps, d) end
-	end
-	local hc = srcHandle.CFrame
-	for i, cp in ipairs(cps) do
-		local sp = sps[i]
-		if sp then
-			ghostOffsets[cp] = hc:Inverse() * sp.CFrame
-			cp.Anchored = true cp.CanCollide = false cp.CanQuery = false cp.CanTouch = false
-		end
+	for _, cp in ipairs(cloneParts) do
+		ghostNameMap[cp] = cp.Name
+		local sp = srcGv:FindFirstChild(cp.Name, true)
+		ghostOffsets[cp] = hc:Inverse() * (sp and sp.CFrame or cp.CFrame)
+		cp.Anchored = true cp.CanCollide = false cp.CanQuery = false cp.CanTouch = false
 	end
 	clone.Name = "waffle_skin"
 	clone.Parent = ws
@@ -418,16 +423,25 @@ end
 
 conn(run.RenderStepped, function()
 	if DEAD then return end
-	local live = findLiveVM()
+	local live = liveWeaponModel()
 	if live ~= ghostLive then
 		ghostLive = live
 		ghostHandle = live and (live:FindFirstChild("Handle", true) or live.PrimaryPart or live:FindFirstChildWhichIsA("BasePart", true))
+		ghostNameMap = {}
+		if ghostModel and live then
+			for _, d in ipairs(ghostModel:GetDescendants()) do
+				if d:IsA("BasePart") then ghostNameMap[d] = d.Name end
+			end
+		end
 	end
 	if not ghostModel then return end
-	if flag("skin_on", false) and ghostLive and ghostHandle and ghostLive.Name == "v_" .. tostring(ghostBase) then
+	if flag("skin_on", false) and ghostLive and ghostHandle then
 		local hc = ghostHandle.CFrame
 		for cp, off in pairs(ghostOffsets) do
-			if cp.Parent then cp.CFrame = hc * off end
+			if cp.Parent then
+				local mate = ghostLive:FindFirstChild(ghostNameMap[cp] or cp.Name, true)
+				cp.CFrame = (mate and mate:IsA("BasePart")) and mate.CFrame or (hc * off)
+			end
 		end
 		for _, d in ipairs(ghostLive:GetDescendants()) do
 			if d:IsA("BasePart") then d.LocalTransparencyModifier = 1 end
@@ -455,19 +469,21 @@ end)
 
 local Controls = {}
 local Window = Library.Window("waffle // valoblox", vec2(540, 620))
-Window.Watermark("waffle")
+pcall(function() Window.Watermark("waffle") end)
 pcall(function() Window.ChangeAnime("Astolfo") end)
-Window.ToggleAnime(false)
+pcall(function() Window.ToggleAnime(false) end)
 
 local combat = Window:Tab("combat")
 local aimSec = combat:Section("silent aim", "Left")
 local silentTgl = aimSec:Toggle({Title = "enabled", Flag = "silent_aim", Default = true, Callback = function(v) end})
 Controls.silent_aim = silentTgl
 Controls.aim_fov = aimSec:Slider({Title = "fov", Flag = "aim_fov", Min = 40, Max = 700, Default = 220, Decimals = 1, Callback = function(v) CFG.FOV = v end})
-Controls.aim_part = aimSec:Dropdown({Title = "bone", Flag = "aim_part", List = {"Head", "Torso", "HumanoidRootPart"}, Default = "Head", Callback = function(v) CFG.AimPart = v end})
+Controls.aim_part = aimSec:Dropdown({Title = "bone", Flag = "aim_part", List = {"HeadHB", "Head", "HumanoidRootPart"}, Default = "HeadHB", Callback = function(v) CFG.AimPart = v end})
 Controls.aim_chance = aimSec:Slider({Title = "hit chance", Flag = "aim_chance", Min = 10, Max = 100, Default = 100, Decimals = 1, Callback = function(v) CFG.Chance = v end})
 Controls.aim_showfov = aimSec:Toggle({Title = "show fov", Flag = "aim_showfov", Default = true})
 Controls.wall_check = aimSec:Toggle({Title = "wall check", Flag = "wall_check", Default = true, Callback = function(v) CFG.WallCheck = v end})
+Controls.wallbang = aimSec:Toggle({Title = "wallbang", Flag = "wallbang", Default = false})
+Controls.wb_debug = aimSec:Toggle({Title = "shot debug", Flag = "wb_debug", Default = false})
 
 local camSec = combat:Section("camera aim", "Right")
 local camTgl = camSec:Toggle({Title = "enabled", Flag = "cam_aim", Default = false})
@@ -481,6 +497,11 @@ Controls.tb_enable = tbSec:Toggle({Title = "enabled", Flag = "tb_enable", Defaul
 Controls.tb_hold = tbSec:Toggle({Title = "hold LAlt", Flag = "tb_hold", Default = false})
 Controls.tb_delay = tbSec:Slider({Title = "delay", Flag = "tb_delay", Min = 0.02, Max = 0.6, Default = 0.05, Decimals = 100})
 
+local afSec = combat:Section("auto fire", "Right")
+Controls.auto_fire = afSec:Toggle({Title = "enabled", Flag = "auto_fire", Default = false})
+Controls.af_delay = afSec:Slider({Title = "fire delay", Flag = "af_delay", Min = 0.02, Max = 0.5, Default = 0.12, Decimals = 100})
+Controls.af_autoshoot = afSec:Toggle({Title = "auto shoot visible", Flag = "af_autoshoot", Default = false})
+
 local vis = Window:Tab("visuals")
 local espSec = vis:Section("esp", "Left")
 Controls.esp_master = espSec:Toggle({Title = "master", Flag = "esp_master", Default = true})
@@ -489,73 +510,74 @@ Controls.esp_hp = espSec:Toggle({Title = "health bar", Flag = "esp_hp", Default 
 Controls.esp_names = espSec:Toggle({Title = "names", Flag = "esp_names", Default = true})
 Controls.esp_dist = espSec:Toggle({Title = "distance", Flag = "esp_dist", Default = true})
 Controls.esp_skel = espSec:Toggle({Title = "skeleton", Flag = "esp_skel", Default = true})
-Controls.esp_tracers = espSec:Toggle({Title = "tracers", Flag = "esp_tracers", Default = true})
-Controls.esp_arrows = espSec:Toggle({Title = "offscreen arrows", Flag = "esp_arrows", Default = true})
-Controls.team_check = espSec:Toggle({Title = "team check", Flag = "team_check", Default = true})
-local colSec = vis:Section("colors", "Right")
-Controls.col_enemy = colSec:Colorpicker({Title = "enemy", Flag = "col_enemy", Color = colEnemy, Callback = function(v) colEnemy = v end})
-Controls.col_friend = colSec:Colorpicker({Title = "friend", Flag = "col_friend", Color = colFriend, Callback = function(v) colFriend = v end})
+
+local espSec2 = vis:Section("esp 2", "Right")
+Controls.esp_tracers = espSec2:Toggle({Title = "tracers", Flag = "esp_tracers", Default = true})
+Controls.esp_arrows = espSec2:Toggle({Title = "offscreen arrows", Flag = "esp_arrows", Default = true})
+Controls.team_check = espSec2:Toggle({Title = "team check", Flag = "team_check", Default = true})
+Controls.enemy_col = espSec2:ColorPicker({Title = "enemy color", Flag = "enemy_col", Default = colEnemy, Callback = function(v) colEnemy = v end})
+Controls.friend_col = espSec2:ColorPicker({Title = "friend color", Flag = "friend_col", Default = colFriend, Callback = function(v) colFriend = v end})
 
 local misc = Window:Tab("misc")
-local miscSec = misc:Section("gameplay", "Left")
-Controls.anti_afk = miscSec:Toggle({Title = "anti afk", Flag = "anti_afk", Default = true})
-local skinSec = misc:Section("skin changer", "Right")
-Controls.skin_pick = skinSec:Dropdown({Title = "skin", Flag = "skin_pick", List = skinOptions, Default = skinOptions[1] or "none"})
+local skinSec = misc:Section("skin changer", "Left")
+Controls.skin_pick = skinSec:Dropdown({Title = "skin", Flag = "skin_pick", List = skinOptions, Default = skinOptions[1]})
 Controls.skin_on = skinSec:Toggle({Title = "enabled", Flag = "skin_on", Default = false})
-skinSec:Button({Title = "apply skin", Callback = function() applySkin(flag("skin_pick")) end})
-skinSec:Button({Title = "clear skin", Callback = clearGhost})
-
-local function cfgPath()
-	local s = flag("cfg_slot", "default")
-	return s == "default" and "valo_cfg.json" or "valo_cfg_" .. s:gsub("%s+", "_") .. ".json"
-end
-local function saveCfg()
+skinSec:Button({Title = "apply skin", Callback = function() applySkin(flag("skin_pick", skinOptions[1])) end})
+skinSec:Button({Title = "clear skin", Callback = function() clearGhost() end})
+skinSec:Button({Title = "unlock all skins (probe)", Callback = function()
 	pcall(function()
-		local out = {}
-		for k, v in pairs(Flags) do
-			if typeof(v) == "Color3" then out[k] = {__col = v:ToHex()}
-			elseif typeof(v) == "EnumItem" then out[k] = {__enum = tostring(v)}
-			else out[k] = v end
+		local f = rs:FindFirstChild("Events") and rs.Events:FindFirstChild("UnlockAllSkins")
+		if f then
+			local r = f:InvokeServer()
+			print("[valo] UnlockAllSkins ->", typeof(r), tostring(r))
 		end
-		if writefile then writefile(cfgPath(), http_service:JSONEncode(out)) end
 	end)
-end
-local function flagColor(name, fallback)
-	local v = Flags[name]
-	if typeof(v) == "Color3" then return v end
-	if type(v) == "string" and v:sub(1, 1) == "#" then return Color3.fromHex(v) end
-	return fallback
-end
-local function loadCfg()
+end})
+
+local miscSec = misc:Section("misc", "Right")
+Controls.anti_afk = miscSec:Toggle({Title = "anti afk", Flag = "anti_afk", Default = true})
+
+local settings = Window:Tab("settings")
+local cfgSec = settings:Section("config", "Left")
+local slots = {"slot 1", "slot 2", "slot 3"}
+local slotFiles = {["slot 1"] = "valo_cfg.json", ["slot 2"] = "valo_cfg_slot_2.json", ["slot 3"] = "valo_cfg_slot_3.json"}
+local curSlot = "slot 1"
+cfgSec:Dropdown({Title = "slot", Flag = "cfg_slot", List = slots, Default = "slot 1", Callback = function(v) curSlot = v end})
+cfgSec:Button({Title = "save", Callback = function()
 	pcall(function()
-		local path = cfgPath()
-		if not (isfile and isfile(path)) then return end
-		local cfg = http_service:JSONDecode(readfile(path))
-		for k, v in pairs(cfg) do
-			local ctl = Controls[k]
-			if type(v) == "table" and v.__col then v = v.__col end
-			if type(v) == "string" and v:sub(1, 1) == "#" and ctl and ctl.SetHue then
-				local c = Color3.fromHex(v)
-				local h, s, vv = c:ToHSV()
-				pcall(function() ctl:SetHue(h) ctl:SetSaturationX(s) ctl:SetSaturationY(vv) end)
+		local data = {}
+		for k in pairs(Flags) do data[k] = Flags[k] end
+		data._cfg = {FOV = CFG.FOV, Smooth = CFG.Smooth, WallCheck = CFG.WallCheck, AimPart = CFG.AimPart, Chance = CFG.Chance}
+		data._col = {e = {colEnemy.R * 255, colEnemy.G * 255, colEnemy.B * 255}, f = {colFriend.R * 255, colFriend.G * 255, colFriend.B * 255}}
+		writefile(slotFiles[curSlot], game:GetService("HttpService"):JSONEncode(data))
+	end)
+end})
+cfgSec:Button({Title = "load", Callback = function()
+	pcall(function()
+		if not isfile(slotFiles[curSlot]) then return end
+		local data = game:GetService("HttpService"):JSONDecode(readfile(slotFiles[curSlot]))
+		if data._cfg then
+			CFG.FOV = data._cfg.FOV CFG.Smooth = data._cfg.Smooth CFG.WallCheck = data._cfg.WallCheck
+			CFG.AimPart = data._cfg.AimPart CFG.Chance = data._cfg.Chance
+		end
+		if data._col then
+			colEnemy = rgb(data._col.e[1], data._col.e[2], data._col.e[3])
+			colFriend = rgb(data._col.f[1], data._col.f[2], data._col.f[3])
+		end
+		for k, v in pairs(data) do
+			if k ~= "_cfg" and k ~= "_col" then
 				Flags[k] = v
-			elseif k ~= "aim_bind" and type(v) ~= "table" then
-				if ctl and ctl.Set then pcall(function() ctl:Set(v) end)
-				else Flags[k] = v end
+				local c = Controls[k]
+				if c and c.SetValue then pcall(function() c:SetValue(v) end)
+				elseif c and c.Set then pcall(function() c:Set(v) end) end
 			end
 		end
-		CFG.FOV = flag("aim_fov", 220)
-		CFG.AimPart = flag("aim_part", "Head")
-		CFG.Chance = flag("aim_chance", 100)
-		CFG.Smooth = flag("aim_smooth", 0.3)
-		CFG.WallCheck = flag("wall_check", true)
-		colEnemy = flagColor("col_enemy", colEnemy)
-		colFriend = flagColor("col_friend", colFriend)
 	end)
-end
-local function vaUnload()
+end})
+local function unloadAll()
 	if DEAD then return end
 	DEAD = true
+	for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
 	for _, e in pairs(espPool) do
 		for _, l in ipairs(e.box) do pcall(function() l:Remove() end) end
 		for _, l in ipairs(e.hp) do pcall(function() l:Remove() end) end
@@ -563,33 +585,14 @@ local function vaUnload()
 		pcall(function() e.tracer:Remove() end) pcall(function() e.arrow:Remove() end)
 		for _, l in ipairs(e.skel) do pcall(function() l:Remove() end) end
 	end
-	table.clear(espPool)
 	pcall(function() fovCircle:Remove() end)
-	if ghostLive then
-		pcall(function()
-			for _, d in ipairs(ghostLive:GetDescendants()) do
-				if d:IsA("BasePart") then d.LocalTransparencyModifier = 0 end
-			end
-		end)
-	end
 	clearGhost()
 	if hooked then pcall(function() hookmetamethod(game, "__namecall", oldNC) end) end
-	for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
-	pcall(function() Library.SelfDestruct() end)
+	pcall(function() if Window.Unload then Window:Unload() elseif Library.Unload then Library:Unload() end end)
 end
-getgenv().__vaUnload = vaUnload
 
-uis.InputBegan:Connect(function(input, gpe)
-	if input.KeyCode == Enum.KeyCode.End then vaUnload() end
+settings:Section("unload", "Right"):Button({Title = "unload (End)", Callback = unloadAll})
+
+uis.InputBegan:Connect(function(inp)
+	if inp.KeyCode == Enum.KeyCode.End then unloadAll() end
 end)
-
-local settingsTab = Window:AddSettingsTab(vaUnload)
-local cfgSec = settingsTab:Section("config", "Right")
-Controls.cfg_slot = cfgSec:Dropdown({Title = "slot", Flag = "cfg_slot", List = {"default", "slot 2", "slot 3"}, Default = "default"})
-cfgSec:Button({Title = "save config", Callback = saveCfg})
-cfgSec:Button({Title = "load config", Callback = loadCfg})
-cfgSec:Button({Title = "unload", Callback = vaUnload})
-
-Window:SwitchTab(combat)
-loadCfg()
-print("[valo] waffle up — Delete toggles, End unloads")
