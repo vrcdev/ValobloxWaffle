@@ -300,6 +300,7 @@ end)
 local pendingShot = nil
 local inRay = false
 local lastRedirect = 0
+local lastFireT = 0
 local function rayAimsAt(origin, dir, targetPos)
 	if dir.Magnitude == 0 then return false end
 	local unit = dir.Unit
@@ -317,7 +318,8 @@ if hookmetamethod and getnamecallmethod and newcclosure then
 			local method = getnamecallmethod()
 			if method == "ScreenPointToRay" or method == "ViewportPointToRay" then
 				if checkcaller() or self ~= ws.CurrentCamera then return oldNC(self, ...) end
-				if not flag("silent_aim", true) or not curTarget then
+				local firing = uis:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) or (os.clock() - lastFireT < 0.15)
+				if not flag("silent_aim", true) or not curTarget or not firing then
 					pendingShot = nil
 					return oldNC(self, ...)
 				end
@@ -331,6 +333,7 @@ if hookmetamethod and getnamecallmethod and newcclosure then
 			if not flag("silent_aim", true) then return oldNC(self, ...) end
 			local now = os.clock()
 			if now - lastRedirect < 0.04 then return oldNC(self, ...) end
+			if not (uis:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) or now - lastFireT < 0.15) then return oldNC(self, ...) end
 			local ps = pendingShot
 			if ps and now - ps.t > 0.5 then
 				pendingShot = nil
@@ -351,7 +354,9 @@ if hookmetamethod and getnamecallmethod and newcclosure then
 			local args = {...}
 			if method == "Raycast" and self == ws then
 				local origin, dir = args[1], args[2]
-				if typeof(origin) == "Vector3" and typeof(dir) == "Vector3" and dir.Magnitude > 0 and rayAimsAt(origin, dir, tpart.Position) then
+				if typeof(origin) == "Vector3" and typeof(dir) == "Vector3" and dir.Magnitude > 0
+					and (origin - ws.CurrentCamera.CFrame.Position).Magnitude <= 8
+					and rayAimsAt(origin, dir, tpart.Position) then
 					local params = args[3]
 					if wb then
 						local rp = RaycastParams.new()
@@ -365,7 +370,9 @@ if hookmetamethod and getnamecallmethod and newcclosure then
 				end
 			elseif self == ws and (method == "FindPartOnRay" or method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRayWithWhitelist" or method == "FindPartOnRayWithBlackList") then
 				local ray = args[1]
-				if typeof(ray) == "Ray" and ray.Direction.Magnitude > 0 and rayAimsAt(ray.Origin, ray.Direction, tpart.Position) then
+				if typeof(ray) == "Ray" and ray.Direction.Magnitude > 0
+					and (ray.Origin - ws.CurrentCamera.CFrame.Position).Magnitude <= 8
+					and rayAimsAt(ray.Origin, ray.Direction, tpart.Position) then
 					local newRay = Ray.new(ray.Origin, (tpart.Position - ray.Origin).Unit * ray.Direction.Magnitude)
 					lastRedirect = now
 					if flag("wb_debug", false) then print("[valo] shot ->", tchar.Name) end
@@ -581,6 +588,9 @@ local function noAfk()
 end
 conn(lp.Idled, function()
 	if flag("anti_afk", true) then noAfk() end
+end)
+conn(uis.InputBegan, function(inp)
+	if inp.UserInputType == Enum.UserInputType.MouseButton1 then lastFireT = os.clock() end
 end)
 
 local Controls = {}
